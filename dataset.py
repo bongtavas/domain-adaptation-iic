@@ -15,7 +15,8 @@ class MNIST_SVHN(Dataset):
             transforms.ToTensor(),
         ])
         svhn_transforms = transforms.Compose([
-            transforms.CenterCrop(config.input_sz),
+            transforms.CenterCrop(config.rand_crop_sz),
+            transforms.Resize(config.input_sz),
             custom_greyscale_to_tensor(config.include_rgb),
         ])
 

@@ -1,4 +1,4 @@
-from models.net6c import ClusterNet6c
+from models.net5g import ClusterNet5g
 from dataset import MNIST_SVHN
 from torch.utils.data import DataLoader
 from utils.IID_losses import IID_loss
@@ -40,7 +40,7 @@ def parse_config():
     parser.add_argument("--output_k_A", type=int, default=50)
     parser.add_argument("--output_k_B", type=int, default=10)
 
-    parser.add_argument("--input_sz", type=int, default=24)
+    parser.add_argument("--input_sz", type=int, default=32)
     parser.add_argument("--rand_crop_sz", type=int, default=20)
     parser.add_argument("--include_rgb", default=False, action="store_true")
 
@@ -61,7 +61,7 @@ def train(config):
 
     train_loader = DataLoader(dataset, batch_size=config.batch_sz, shuffle=True)
 
-    net_model = ClusterNet6c(config)
+    net_model = ClusterNet5g(config)
 
     net_model.cuda()
 
@@ -132,7 +132,8 @@ def evaluate(net_model, config):
 
 def eval_dest(net_model):
     dest_dataset = datasets.SVHN(root='./data', split='test', download=True, transform=transforms.Compose([
-        transforms.CenterCrop(config.input_sz),
+        transforms.CenterCrop(config.rand_crop_sz),
+        transforms.Resize(config.input_sz),
         custom_greyscale_to_tensor(config.include_rgb),
     ]))
     dest_loader = DataLoader(dest_dataset, batch_size=config.batch_sz, shuffle=False)
