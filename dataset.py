@@ -1,30 +1,30 @@
 from torch.utils.data import DataLoader, Dataset
 from torchvision import datasets
 from torchvision import transforms
+from utils.transforms import custom_greyscale_to_tensor
 import numpy as np
 
 np.random.seed(5241)
 
 
 class MNIST_SVHN(Dataset):
-    def __init__(self, K=10):
+    def __init__(self, config):
         mnist_transforms = transforms.Compose([
-            transforms.Resize((32, 32)),
-            transforms.Grayscale(3),
+            transforms.RandomCrop(config.rand_crop_sz),
+            transforms.Resize(config.input_sz),
             transforms.ToTensor(),
-            transforms.Normalize((0.1307,), (0.3081,))
         ])
         svhn_transforms = transforms.Compose([
-            transforms.ToTensor(),
-            transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5])
+            transforms.CenterCrop(config.input_sz),
+            custom_greyscale_to_tensor(config.include_rgb),
         ])
 
         # Load MNIST data
         self.mnist_data = datasets.MNIST('./data', download=True, transform=mnist_transforms)
-
-        # Load 1k samples from SVHN
-        svhn_data = datasets.SVHN('./data', download=True, transform=svhn_transforms)
-        svhn_loader = DataLoader(svhn_data, batch_size=1000, shuffle=True)
+        
+        # Load SVHN data
+        self.svhn_data = datasets.SVHN('./data', download=True, transform=svhn_transforms)
+        svhn_loader = DataLoader(self.svhn_data, batch_size=len(self.svhn_data), shuffle=True)
         svhn_batch = next(iter(svhn_loader))
         self.svhn_x, self.svhn_y = svhn_batch
 
@@ -34,9 +34,17 @@ class MNIST_SVHN(Dataset):
             y = label.item()
             self.svhn_class_indices.setdefault(y, []).append(idx)
 
-        # Select K samples from svhn
+        print("SVHN dataset before trim")
+        for key in sorted(self.svhn_class_indices):
+            print("class %s size: %d" % (key, len(self.svhn_class_indices[key])))
+
+        # Select num_dest_per_class samples from svhn
         for label in self.svhn_class_indices:
-            self.svhn_class_indices[label] = np.random.choice(self.svhn_class_indices[label], K)
+            self.svhn_class_indices[label] = np.random.choice(self.svhn_class_indices[label], config.num_dest_per_class)
+
+        print("SVHN dataset after trim")
+        for key in sorted(self.svhn_class_indices):
+            print("class %s size: %d" % (key, len(self.svhn_class_indices[key])))
 
     def __len__(self):
         return len(self.mnist_data)
