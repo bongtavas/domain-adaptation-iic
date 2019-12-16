@@ -1,9 +1,7 @@
 from models.net5g_two_head import ClusterNet5gTwoHead
-from dataset import MNIST_SVHN
 from torch.utils.data import DataLoader
 from utils.IID_losses import IID_loss
-from utils.train_utils import get_opt, update_lr
-from utils.eval_metrics import hungarian_match, accuracy
+
 import numpy as np
 import argparse
 import time
@@ -13,6 +11,9 @@ import os
 from torchvision import datasets
 from torchvision import transforms
 from utils.transforms import sobel_process, custom_greyscale_to_tensor
+from utils.data import create_dataloaders, get_preds_and_targets, get_preds_actual_class
+from utils.train_utils import get_opt
+from utils.eval_metrics import hungarian_match, accuracy
 
 np.random.seed(5241)
 logging.basicConfig(format='%(asctime)s - %(message)s', level=logging.INFO)
@@ -37,6 +38,11 @@ def parse_config():
     parser.add_argument("--results_path", type=str, default="results")
     parser.add_argument("--save_freq", type=int, default=10)
 
+    # Dataset Settings
+    parser.add_argument("--dset_A_name", default="MNIST")
+    parser.add_argument("--dset_B_name", default="SVHN")
+    parser.add_argument("--num_dataloaders", type=int, default=5)
+
     # Model Settings
     parser.add_argument("--head_A_first", default=True, action="store_true")
     parser.add_argument("--head_A_epochs", type=int, default=1)
@@ -45,8 +51,10 @@ def parse_config():
     parser.add_argument("--output_k_A", type=int, default=50)
     parser.add_argument("--output_k_B", type=int, default=10)
 
+    # Transforms
     parser.add_argument("--input_sz", type=int, default=32)
     parser.add_argument("--rand_crop_sz", type=int, default=20)
+    parser.add_argument("--rot_val", type=float, default=25)
     parser.add_argument("--include_rgb", default=False, action="store_true")
 
     config = parser.parse_args()
@@ -62,9 +70,8 @@ def parse_config():
 
 
 def train(config):
-    dataset = MNIST_SVHN(config)
 
-    train_loader = DataLoader(dataset, batch_size=config.batch_sz, shuffle=True)
+    dataloaders_head_A, dataloaders_head_B = create_dataloaders(config)
 
     model = ClusterNet5gTwoHead(config)
 
@@ -89,15 +96,24 @@ def train(config):
 
         for head_i in range(2):
             head = heads[head_i]
+
+            if head == "A":
+                dataloaders = dataloaders_head_A
+            elif head == "B":
+                dataloaders = dataloaders_head_B
+
             for head_i_epoch in range(head_epochs[head]):
-                for batch_i, batch in enumerate(train_loader):
-                    train_model(model, head, batch, batch_i, epoch, optimiser, start_time)
+                batch_i = 0
+                for dataloader in dataloaders:
+                    for batch in dataloader:
+                        train_model(model, head, batch, batch_i, epoch, optimiser, start_time)
+                        batch_i += 1
         stats = evaluate(model, config)
         print_stats(stats)
         if stats["best"] > best_acc:
             best_acc = stats["best"]
             logging.info("Accuracy improved, saving model")
-            torch.save(model.state_dict, model_save_path)
+            torch.save(model.state_dict(), model_save_path)
 
 
 def train_model(model, head, batch, batch_i, epoch, optimiser, start_time):
@@ -160,6 +176,8 @@ def eval_dest(net_model):
     dest_loader = DataLoader(dest_dataset, batch_size=config.batch_sz, shuffle=False)
 
     preds, targets = get_preds_and_targets(config, net_model, dest_loader, dest_dataset)
+    preds = preds.cuda()
+    targets = targets.cuda()
 
     matches = []
     accs = []
@@ -182,53 +200,7 @@ def eval_dest(net_model):
     }
 
 
-def get_preds_and_targets(config, net_model, val_loader, dataset):
-    dataset_size = len(dataset)
-    preds = torch.zeros(config.num_sub_heads, dataset_size)
-    targets = torch.zeros(dataset_size)
-    batch_sz = config.batch_sz
-
-    for b_i, batch in enumerate(val_loader):
-        src_x, label = batch
-        src_x = src_x.cuda()
-
-        src_x = sobel_process(src_x, config.include_rgb)
-
-        with torch.no_grad():
-            src_y = net_model(src_x)  # (batch_size, num_classes)
-
-        start_i = b_i * batch_sz
-        end_i = start_i + label.size(0)
-        for i in range(config.num_sub_heads):
-            preds[i][start_i:end_i] = torch.argmax(src_y[i], dim=1)
-
-        targets[start_i:end_i] = label
-
-    preds = preds.cuda()
-    targets = targets.cuda()
-
-    return preds, targets
-
-
-def get_preds_actual_class(preds, matches, config):
-    num_samples = preds.size(0)
-    new_preds = torch.zeros(num_samples, dtype=preds.dtype)
-    found = torch.zeros(config.num_classes)
-
-    if torch.cuda.is_available():
-        new_preds = new_preds.cuda()
-
-    for pred_i, target_i in matches:
-        new_preds[torch.eq(preds, int(pred_i))] = torch.from_numpy(np.array(target_i)).cuda().int().item()
-        found[pred_i] = 1
-
-    assert (found.sum() == config.num_classes)  # each output_k must get mapped
-
-    return new_preds
-
-
 if __name__ == "__main__":
 
     config = parse_config()
-
     train(config)
