@@ -90,9 +90,10 @@ def train(config):
     head_epochs = {}
     head_epochs["A"] = config.head_A_epochs
     head_epochs["B"] = config.head_B_epochs
+    
+    start_time = time.time()
 
     for epoch in range(1, config.num_epochs + 1):
-        start_time = time.time()
 
         for head_i in range(2):
             head = heads[head_i]
@@ -114,6 +115,8 @@ def train(config):
             best_acc = stats["best"]
             logging.info("Accuracy improved, saving model")
             torch.save(model.state_dict(), model_save_path)
+        end_time = time.time()
+        logging.info("Elapsed Time {%4f} " end_time - start_time)
 
 
 def train_model(model, head, batch, batch_i, epoch, optimiser, start_time):
@@ -142,11 +145,10 @@ def train_model(model, head, batch, batch_i, epoch, optimiser, start_time):
 
     avg_loss_batch /= config.num_sub_heads
     avg_loss_no_lamb_batch /= config.num_sub_heads
-    end = time.time()
 
     if batch_i % 40 == 0:
-        logging.info("=== Epoch {%s} Head {%s} Batch: {%d} Avg Loss: {%f} Avg Loss No Lamb: {%f}  Running time: {%4f}" %
-                     (str(epoch), head, batch_i, avg_loss_batch.item(), avg_loss_no_lamb_batch.item(), end - start_time))
+        logging.info("=== Epoch {%s} Head {%s} Batch: {%d} Avg Loss: {%f}" %
+                     (str(epoch), head, batch_i, avg_loss_batch.item())
 
     avg_loss_batch.backward()
     optimiser.step()
