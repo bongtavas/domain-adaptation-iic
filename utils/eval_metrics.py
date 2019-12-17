@@ -3,7 +3,9 @@ from __future__ import print_function
 import numpy as np
 import torch
 from sklearn import metrics
-from scipy.optimize import linear_sum_assignment
+import warnings
+warnings.filterwarnings("ignore", category=DeprecationWarning) 
+from sklearn.utils.linear_assignment_ import linear_assignment
 
 
 def _original_match(flat_preds, flat_targets, preds_k, targets_k):
@@ -43,7 +45,7 @@ def hungarian_match(flat_preds, flat_targets, num_classes):
             num_correct[c1, c2] = votes
 
     # num_correct is small
-    match = linear_sum_assignment(num_samples - num_correct)
+    match = linear_assignment(num_samples - num_correct)
 
     # return as list of tuples, out_c to gt_c
     res = []

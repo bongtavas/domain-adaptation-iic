@@ -41,6 +41,7 @@ def parse_config():
     # Dataset Settings
     parser.add_argument("--dset_A_name", default="MNIST")
     parser.add_argument("--dset_B_name", default="SVHN")
+    parser.add_argument("--dset_B_all", default=False, action="store_true")
     parser.add_argument("--num_dataloaders", type=int, default=5)
 
     # Model Settings
@@ -71,7 +72,7 @@ def parse_config():
 
 def train(config):
 
-    dataloaders_head_A, dataloaders_head_B = create_dataloaders(config)
+    dataloaders_head_A, dataloaders_head_B, src_test_loader, dest_test_loader = create_dataloaders(config)
 
     model = ClusterNet5gTwoHead(config)
 
@@ -109,28 +110,27 @@ def train(config):
                     for batch in dataloader:
                         train_model(model, head, batch, batch_i, epoch, optimiser, start_time)
                         batch_i += 1
-        stats = evaluate(model, config)
-        print_stats(stats)
-        if stats["best"] > best_acc:
-            best_acc = stats["best"]
+        dest_stats = evaluate(model, config, src_test_loader, dest_test_loader)
+        if dest_stats["best"] > best_acc:
+            best_acc = dest_stats["best"]
             logging.info("Accuracy improved, saving model")
             torch.save(model.state_dict(), model_save_path)
-        end_time = time.time()
-        logging.info("Elapsed Time {%4f} " end_time - start_time)
+
+        elapsed = time.time() - start_time
+        logging.info("Elapsed Time {%4f} " % (elapsed,))
 
 
 def train_model(model, head, batch, batch_i, epoch, optimiser, start_time):
     model.module.zero_grad()
-    mnist_x, svhn_x, label_y = batch
-    mnist_x = mnist_x.cuda()
-    svhn_x = svhn_x.cuda()
-    label_y = label_y.cuda()
+    src_x, dest_x, _ = batch
+    src_x = src_x.cuda()
+    dest_x = dest_x.cuda()
 
-    mnist_x = sobel_process(mnist_x, config.include_rgb)
-    svhn_x = sobel_process(svhn_x, config.include_rgb)
+    src_x = sobel_process(src_x, config.include_rgb)
+    dest_x = sobel_process(dest_x, config.include_rgb)
 
-    z = model(mnist_x, head=head)
-    z_prime = model(svhn_x, head=head)
+    z = model(src_x, head=head)
+    z_prime = model(dest_x, head=head)
 
     avg_loss_batch = None  # avg over the heads
     avg_loss_no_lamb_batch = None
@@ -148,36 +148,34 @@ def train_model(model, head, batch, batch_i, epoch, optimiser, start_time):
 
     if batch_i % 40 == 0:
         logging.info("=== Epoch {%s} Head {%s} Batch: {%d} Avg Loss: {%f}" %
-                     (str(epoch), head, batch_i, avg_loss_batch.item())
+                     (str(epoch), head, batch_i, avg_loss_batch.item()))
 
     avg_loss_batch.backward()
     optimiser.step()
 
 
 def print_stats(stats):
-    print("Stats:")
     for key in stats:
         print("{} : {}".format(key, stats[key]))
     print()
 
 
-def evaluate(net_model, config):
+def evaluate(net_model, config, src_test_loader, dest_test_loader):
     net_model.eval()
-    dest_stats = eval_dest(net_model)
+    src_stats = eval_model(net_model, src_test_loader)
+    dest_stats = eval_model(net_model, dest_test_loader)
     net_model.train()
+
+    print("==== Source Stats ====")
+    print_stats(src_stats)
+    print("==== Dest Stats ====")
+    print_stats(dest_stats)
 
     return dest_stats
 
 
-def eval_dest(net_model):
-    dest_dataset = datasets.SVHN(root='./data', split='test', download=True, transform=transforms.Compose([
-        transforms.CenterCrop(config.rand_crop_sz),
-        transforms.Resize(config.input_sz),
-        custom_greyscale_to_tensor(config.include_rgb),
-    ]))
-    dest_loader = DataLoader(dest_dataset, batch_size=config.batch_sz, shuffle=False)
-
-    preds, targets = get_preds_and_targets(config, net_model, dest_loader, dest_dataset)
+def eval_model(net_model, dataloader):
+    preds, targets = get_preds_and_targets(config, net_model, dataloader)
     preds = preds.cuda()
     targets = targets.cuda()
 
@@ -193,12 +191,12 @@ def eval_dest(net_model):
     best_subhead = np.argmax(accs)
     worst_subhead = np.argmin(accs)
     return {
-        "accs": accs,
-        "avg": np.mean(accs),
-        "std": np.std(accs),
         "best": accs[best_subhead],
         "worst": accs[worst_subhead],
-        "best_train_sub_head": matches[best_subhead]
+        "avg": np.mean(accs),
+        "std": np.std(accs),
+        "best_train_sub_head": matches[best_subhead],
+        "accs": accs,
     }
 
 
